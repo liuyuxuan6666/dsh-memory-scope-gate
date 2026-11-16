@@ -1,0 +1,8 @@
+# dsh-memory-scope-gate bundle patch
+# 一条 Host 行：注册 engram_* 的记忆披露闸（默认只允许本工作区），
+# 以及一个 web 路由给输入框里的「记忆层级」开关读写会话级状态。
+- insert:
+    - id: memory-scope-gate
+      name: 'dsh-memory-scope-gate'
+      config:
+        defaultLevel: 'workspace'

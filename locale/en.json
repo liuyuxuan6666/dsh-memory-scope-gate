@@ -1,0 +1,14 @@
+{
+  "meta": {
+    "title": "Memory disclosure gate",
+    "description": "Per-session control over how far memory retrieval may reach: workspace-only by default, with a composer toggle that widens it to global. Blocks out-of-scope engram_* calls before dispatch."
+  },
+  "ui": {
+    "levelWorkspace": "Workspace",
+    "levelGlobal": "Global",
+    "labelWorkspace": "Memory: local",
+    "labelGlobal": "Memory: global",
+    "titleWorkspace": "Memory disclosure: this workspace only. engram_* may read the current workspace's memory store; click to widen to global.",
+    "titleGlobal": "Memory disclosure: global. engram_* may reach the private and shared stores across workspaces; click to narrow back."
+  }
+}

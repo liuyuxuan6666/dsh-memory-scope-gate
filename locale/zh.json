@@ -1,0 +1,14 @@
+{
+  "meta": {
+    "title": "记忆披露闸",
+    "description": "按会话控制记忆检索的披露范围：默认只读本工作区的记忆库，输入框左侧的开关可临时升到全局。拦截 engram_* 工具里越权的 scope。"
+  },
+  "ui": {
+    "levelWorkspace": "本工作区",
+    "levelGlobal": "全局",
+    "labelWorkspace": "记忆·本区",
+    "labelGlobal": "记忆·全局",
+    "titleWorkspace": "记忆披露层级：本工作区。engram_* 只能访问当前工作区的记忆库；点一下切到全局。",
+    "titleGlobal": "记忆披露层级：全局。engram_* 可访问私人库与共享库（跨工作区）；点一下收回本工作区。"
+  }
+}
