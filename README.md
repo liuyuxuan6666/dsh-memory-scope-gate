@@ -13,6 +13,10 @@
 | `workspace`（默认） | 只放行 `"project"`；省略 scope、`user`、`shared`、`all` 在 dispatch 前拦下 |
 | `global` | 不拦（= 现在的行为） |
 
+另有一条 **id 白名单防线**：`engram_examine` / `engram_neighbors` 只吃 id、没有 scope 可查，
+所以「本区」档位下它们只接受**本会话检索结果里出现过、且标注为 `[project/...]` 的记忆 id**。
+`[user/...]`、`[shared/...]` 行的 id 永不入白名单；切回「本区」会清空白名单。
+
 层级是**按会话**的，落在 `$DSH_HOME/dsh-memory-scope-gate/levels.json`。
 输入框左侧有开关：「记忆·本区」⇄「记忆·全局」，点一下即时生效。
 
@@ -31,8 +35,7 @@
 
 1. **只管调用层**。engram 的自动摄取（`config.ingest`）不经过工具调用，本插件拦不住它往私人库写。
    要连写入一起收紧，得改 engram 自己，或者把 `ingest` 关掉。
-2. **只管带 `scope` 参数的工具**。`engram_examine` / `engram_neighbors` / `engram_assess` 没有 scope，
-   只要 id 是从已过滤的结果里拿到的就没问题。
+2. **没有 scope 的工具**走 id 白名单（见上）。`engram_assess` 只对给定 ref 做判定、不吃 id，不受影响。
 3. **面板不受影响**。侧栏「记忆宫殿」的浏览与 scope 三宫格仍然是全局视图，那是你自己看的地方。
 4. 层级按会话存，**不写进会话日志**；DSH 重启后仍在（文件持久化），会话归档后条目留着不清理。
 

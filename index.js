@@ -1,21 +1,24 @@
 /**
- * dsh-memory-scope-gate — Host half (v0.1.0).
+ * dsh-memory-scope-gate — Host half (v0.2.0).
  *
- * 记忆披露闸：给 `engram_*` 工具调用按 **会话** 加一层 scope 闸。
+ * 记忆披露闸：给 `engram_*` 工具调用按 **会话** 加一层访问控制。
  *
- *   - 层级 `workspace`（默认）：只放行 `scope:"project"`。
- *     省略 scope（engram 会默认合并「私人 + 项目 + 共享」三库）、
- *     `user`、`shared`、`all` 一律在 dispatch 之前拦下。
- *   - 层级 `global`：不拦。
+ * 两条防线（「本区」档位下）：
+ *   1. 带 `scope` 参数的工具：只放行 `scope:"project"`。
+ *      省略 scope（engram 默认合并「私人 + 项目 + 共享」三库）、`user`、`shared`、`all` 一律拦下。
+ *   2. 只吃 id 的工具（`engram_examine` / `engram_neighbors`）没有 scope 可查，
+ *      改为 **id 白名单**：只接受本会话检索结果里出现过、且标注为 `[project/...]` 的记忆 id。
+ *      `[user/...]` 与 `[shared/...]` 行的 id 永不入白名单——切回「本区」就收回。
  *
+ * 层级 `global`：两条防线都不生效。
  * 层级按 sessionId 落在 `$DSH_HOME/dsh-memory-scope-gate/levels.json`，
  * 由输入框左侧的开关（client half）经本插件的回环路由读写。
  *
  * 设计边界（诚实声明）：
  *   1. 只拦"调用层"：engram 的自动摄取（config.ingest）不经过工具层，拦不住。
- *   2. 只拦"带 scope 参数"的工具；schema 取不到时用 SCOPED_FALLBACK 兜底，
- *      都不认识的新工具放行并写日志（宁可漏也不锁死）。
+ *   2. 认不出的新工具/新参数放行并写日志（宁可漏也不锁死）；能识别的都拦。
  *   3. 闸自己出错时 fail-closed：engram_* 直接拒（附错误摘要），其它工具照常。
+ *   4. 闸是访问控制，不是记忆清除：已经进入会话上下文的内容，切档位不会消失。
  */
 import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
@@ -26,11 +29,7 @@ const LEVELS = new Set(['workspace', 'global'])
 const DEFAULT_LEVEL = 'workspace'
 const ROUTE_PATH = '/dsh-memory-scope-gate/state'
 
-/**
- * schema 里查不到 `scope` 参数时的兜底名单。
- * 只收录**确实带 scope** 的 engram 工具；没有 scope 的（engram_examine /
- * engram_neighbors / engram_assess / engram_language_guide）刻意不在表里。
- */
+/** schema 里查不到 `scope` 参数时的兜底名单：这些 engram 工具带 scope。 */
 const SCOPED_FALLBACK = new Set([
   'engram_search',
   'engram_timeline',
@@ -52,6 +51,13 @@ const SCOPED_FALLBACK = new Set([
   'engram_profile_edit',
   'engram_ingest_history',
 ])
+
+/** 只吃 id、没有 scope 参数的召回工具——靠 id 白名单约束。 */
+const ID_ONLY_RECALL = new Set(['engram_examine', 'engram_neighbors'])
+
+/** 只有 `[project/...]` 行上的 id 才进白名单。 */
+const PROJECT_LINE = '[project/'
+const UUID_RE = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi
 
 function dshHome() {
   const fromEnv = process.env.DSH_HOME
@@ -95,16 +101,42 @@ function scopeCapable(exec) {
   return SCOPED_FALLBACK.has(exec?.name)
 }
 
+function requestedIds(args) {
+  if (args === null || typeof args !== 'object') return []
+  if (Array.isArray(args.ids)) return args.ids.filter((id) => typeof id === 'string')
+  if (typeof args.id === 'string') return [args.id]
+  return []
+}
+
+/** 从一次工具结果的文本里收下 `[project/...]` 行上的 id。 */
+function harvestProjectIds(text, into) {
+  for (const line of text.split('\n')) {
+    if (line.indexOf(PROJECT_LINE) === -1) continue
+    const matches = line.match(UUID_RE)
+    if (matches === null) continue
+    for (const id of matches) into.add(id.toLowerCase())
+  }
+}
+
 function describeScope(raw) {
   if (raw === undefined || raw === null || raw === '') return '未传 scope（engram 默认合并 私人+项目+共享 三库）'
   return `scope=${JSON.stringify(raw)}`
 }
 
-function denialReason(name, raw) {
+function scopeDenialReason(name, raw) {
   return [
     `[${PLUGIN}] 本会话的记忆披露层级 = 本工作区，${name} 的 ${describeScope(raw)} 已在 dispatch 前被拦下。`,
     '请改用 scope:"project" 重试（engram 的 project 库就是当前会话 cwd 对应的那个工作区库）。',
     '若确实需要跨工作区或全局记忆，请不要自己绕：让用户点输入框左侧的「记忆·本区」按钮切到「记忆·全局」。',
+  ].join(' ')
+}
+
+function idDenialReason(name, foreignCount, knownCount) {
+  return [
+    `[${PLUGIN}] 本会话的记忆披露层级 = 本工作区，${name} 只接受本会话检索结果里出现过的 project 记忆 id；`,
+    `这次有 ${foreignCount} 个 id 不在白名单（当前白名单 ${knownCount} 个）。`,
+    '请先用 engram_search scope:"project" 检索，再从命中的 id= 里精读；',
+    '要读其他工作区或全局记忆，请让用户把输入框左侧的「记忆·本区」切到「记忆·全局」。',
   ].join(' ')
 }
 
@@ -116,6 +148,18 @@ export function apply(ctx, config) {
 
   let levels = readLevels(stateFile)
   const save = persistLevels(stateFile)
+
+  /** sessionId -> 允许精读的项目记忆 id 集合（进程内，重启即清空）。 */
+  const recallIds = new Map()
+
+  const whitelistOf = (sessionId) => {
+    let set = recallIds.get(sessionId)
+    if (set === undefined) {
+      set = new Set()
+      recallIds.set(sessionId, set)
+    }
+    return set
+  }
 
   const levelOf = (sessionId) => {
     if (typeof sessionId !== 'string' || sessionId.length === 0) return fallbackLevel
@@ -131,6 +175,30 @@ export function apply(ctx, config) {
       // 审计写不进去不影响闸本身。
     }
   }
+
+  // ---- 收 id：本会话的 engram 检索结果里，[project/...] 行上的那些 ----
+  ctx.on('tools/result', (exec, result) => {
+    try {
+      const name = typeof exec?.name === 'string' ? exec.name : ''
+      if (!name.startsWith('engram_')) return
+      if (result?.isError === true) return
+      const blocks = Array.isArray(result?.content) ? result.content : []
+      if (blocks.length === 0) return
+      const sessionId = typeof exec?.agent?.id === 'string' ? exec.agent.id : ''
+      // 只有「本区」档位下看到的 project 行才记；全局档位期间看过的 user 行本就不该在切回后被精读。
+      if (levelOf(sessionId) !== 'workspace') return
+      const into = whitelistOf(sessionId)
+      const before = into.size
+      for (const block of blocks) {
+        if (block === null || typeof block !== 'object') continue
+        if (block.type !== 'text' || typeof block.text !== 'string') continue
+        harvestProjectIds(block.text, into)
+      }
+      if (into.size !== before) audit({ session: sessionId, decision: 'whitelist', added: into.size - before, total: into.size })
+    } catch {
+      // 收 id 失败不影响闸；最坏情况是该条 id 精读被拒。
+    }
+  })
 
   // ---- 梯门：tools/pre-execute（waterfall，decision 自带原因给模型看） ----
   const gate = async (exec, next) => {
@@ -148,13 +216,31 @@ export function apply(ctx, config) {
     if (level === 'global') return next()
 
     try {
-      if (!scopeCapable(exec)) return next()
       const args = exec.arguments !== null && typeof exec.arguments === 'object' ? exec.arguments : {}
+
+      // 防线 2：只吃 id 的召回工具
+      if (ID_ONLY_RECALL.has(name)) {
+        const ids = requestedIds(args)
+        const known = whitelistOf(sessionId)
+        const foreign = ids.filter((id) => !known.has(String(id).toLowerCase()))
+        if (foreign.length > 0) {
+          audit({ session: sessionId, tool: name, level, decision: 'deny-id', ids: ids.length, foreign: foreign.length })
+          return {
+            kind: 'deny',
+            reason: idDenialReason(name, foreign.length, known.size),
+            info: { name: PLUGIN, code: 'id-not-whitelisted', reason: 'workspace-only' },
+          }
+        }
+        return next()
+      }
+
+      // 防线 1：带 scope 的工具
+      if (!scopeCapable(exec)) return next()
       if (args.scope === 'project') return next()
       audit({ session: sessionId, tool: name, scope: args.scope ?? null, level, decision: 'deny' })
       return {
         kind: 'deny',
-        reason: denialReason(name, args.scope),
+        reason: scopeDenialReason(name, args.scope),
         info: { name: PLUGIN, code: 'scope-blocked', reason: 'workspace-only' },
       }
     } catch (error) {
@@ -171,7 +257,13 @@ export function apply(ctx, config) {
 
   ctx.on('tools/pre-execute', gate)
 
-  // ---- 系统提示词：让模型第一次就传对 scope，少一次往返 ----
+  // ---- 会话结束就丢掉白名单，避免进程内无限增长 ----
+  ctx.on('session/disposed', (session) => {
+    const id = session?.id
+    if (typeof id === 'string') recallIds.delete(id)
+  })
+
+  // ---- 系统提示词：让模型第一次就走对路径 ----
   ctx.inject(['systemPrompt'], (scope) => {
     const systemPrompt = scope.get('systemPrompt')
     if (systemPrompt?.context === undefined) return
@@ -182,8 +274,11 @@ export function apply(ctx, config) {
         'Memory disclosure (dsh-memory-scope-gate): memory tool calls are gated per session.',
         'Every engram_* call whose schema has a `scope` parameter MUST pass scope:"project".',
         'Omitting scope, or passing "user", "shared" or "all", is denied before dispatch unless the user',
-        'switched the composer\'s memory-level control to global. Do not work around a denial: retry with',
-        'scope:"project", or ask the user to widen the level.',
+        'switched the composer\'s memory-level control to global.',
+        'engram_examine and engram_neighbors accept only ids that appeared in this session\'s own',
+        'search results on a [project/...] line; an id seen elsewhere is refused.',
+        'Do not work around a denial: search with scope:"project" first, then examine, or ask the user',
+        'to widen the level.',
       ].join(' '),
     })
   })
@@ -208,7 +303,7 @@ export function apply(ctx, config) {
             const url = new URL(req.url ?? ROUTE_PATH, 'http://127.0.0.1')
             const session = url.searchParams.get('session') ?? ''
             const level = levelOf(session)
-            send(200, { session, level, defaultLevel: fallbackLevel })
+            send(200, { session, level, defaultLevel: fallbackLevel, knownIds: whitelistOf(session).size })
             return
           }
           if (req.method === 'POST') {
@@ -222,6 +317,7 @@ export function apply(ctx, config) {
               return
             }
             levels[session] = level
+            if (level === 'workspace') recallIds.delete(session)
             const persisted = save(levels)
             audit({ session, level, decision: 'set', persisted })
             send(200, { session, level, persisted })
@@ -242,5 +338,6 @@ export function apply(ctx, config) {
 
   ctx.effect(() => () => {
     levels = {}
+    recallIds.clear()
   })
 }
