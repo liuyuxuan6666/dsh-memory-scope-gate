@@ -36,19 +36,23 @@ window.__ModuleLoader__.load({
       return lang.toLowerCase().indexOf('zh') === 0 ? STRINGS.zh : STRINGS.en
     }
 
+    // Native small ghost button metrics (shell `._button _sm _ghost`):
+    // height 28 · 12/18 type · padding 0 10px · no border · transparent until hover.
+    const HOVER_BG = 'var(--dsw-alias-interactive-bg-hover, rgba(128,128,128,0.12))'
     const style = {
       display: 'inline-flex',
       alignItems: 'center',
-      gap: 5,
-      height: 24,
-      padding: '0 8px',
-      borderRadius: 6,
-      border: '1px solid var(--dsw-alias-border, rgba(128,128,128,0.32))',
+      justifyContent: 'center',
+      gap: 4,
+      height: 28,
+      padding: '0 10px',
+      border: 'none',
+      borderRadius: 'var(--dsw-radius-sm, 6px)',
       background: 'transparent',
-      color: 'var(--dsw-alias-fg-secondary, #8a8a8a)',
+      color: 'var(--dsw-alias-label-primary, #1f1f1f)',
       font: 'inherit',
       fontSize: 12,
-      lineHeight: 1,
+      lineHeight: '18px',
       cursor: 'pointer',
       userSelect: 'none',
       whiteSpace: 'nowrap',
@@ -56,8 +60,7 @@ window.__ModuleLoader__.load({
 
     const styleGlobal = {
       ...style,
-      color: 'var(--dsw-alias-accent, #3b82f6)',
-      borderColor: 'var(--dsw-alias-accent, #3b82f6)',
+      background: HOVER_BG,
     }
 
     function Chip(props) {
@@ -118,8 +121,10 @@ window.__ModuleLoader__.load({
           'aria-pressed': global,
           'data-memory-scope-gate': level === null ? 'unknown' : level,
           style: global ? styleGlobal : style,
+          onMouseEnter: event => { event.currentTarget.style.background = HOVER_BG },
+          onMouseLeave: event => { event.currentTarget.style.background = global ? HOVER_BG : 'transparent' },
         },
-        h('span', { 'aria-hidden': true, style: { fontSize: 11, opacity: 0.9 } }, global ? '◉' : '◎'),
+        h('span', { 'aria-hidden': true, style: { fontSize: 10, opacity: 0.7 } }, global ? '◉' : '◎'),
         h('span', null, label),
       )
     }
