@@ -1,6 +1,6 @@
 {
   "name": "dsh-memory-scope-gate",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "private": true,
   "type": "module",
   "description": "Per-session memory disclosure gate for DeepSeek Harness: workspace-only by default, composer toggle to widen to global.",
